@@ -19,6 +19,12 @@ from dataloader import *
 import eval_utils
 import misc.utils as utils
 
+#new
+import gc
+import psutil
+process = psutil.Process(os.getpid())
+import time
+
 try:
     import tensorflow as tf
 except ImportError:
@@ -102,27 +108,41 @@ def train(opt):
         data = loader.get_batch('train')
         print('Read data:', time.time() - start)
 
-        torch.cuda.synchronize()
+	#new
+	print("---iter {} (epoch {}), MEM = {}  ".format(iteration, epoch,process.memory_info().rss/1000000.0))
+        
+	torch.cuda.synchronize()
         start = time.time()
 
         tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['masks']]
         tmp = [Variable(torch.from_numpy(_), requires_grad=False).cuda() for _ in tmp]
         fc_feats, att_feats, labels, masks = tmp
+	
+	#new
+	is_wrapped = data['bounds']['wrapped']
+	del(data)
+	print("----iter {} (epoch {}), MEM = {}  ".format(iteration, epoch,process.memory_info().rss/1000000.0))
         
         optimizer.zero_grad()
         loss = crit(model(fc_feats, att_feats, labels), labels[:,1:], masks[:,1:])
+	print("*iter {} (epoch {}), MEM = {}  ".format(iteration, epoch,process.memory_info().rss/1000000.0))
         loss.backward()
         utils.clip_gradient(optimizer, opt.grad_clip)
+	print("**iter {} (epoch {}), MEM = {}  ".format(iteration, epoch,process.memory_info().rss/1000000.0))
         optimizer.step()
         train_loss = loss.data[0]
+	print("***iter {} (epoch {}), MEM = {}  ".format(iteration, epoch,process.memory_info().rss/1000000.0))
         torch.cuda.synchronize()
         end = time.time()
         print("iter {} (epoch {}), train_loss = {:.3f}, time/batch = {:.3f}" \
             .format(iteration, epoch, train_loss, end - start))
+        
+	#new
+	print("iter {} (epoch {}), MEM = {}  ".format(iteration, epoch,process.memory_info().rss/1000000.0))
 
         # Update the iteration and epoch
         iteration += 1
-        if data['bounds']['wrapped']:
+        if is_wrapped: #  data['bounds']['wrapped']:
             epoch += 1
             update_lr_flag = True
 
@@ -138,7 +158,10 @@ def train(opt):
             lr_history[iteration] = opt.current_lr
             ss_prob_history[iteration] = model.ss_prob
 
-        # make evaluation on validation set, and save model
+	#new
+	print("-iter {} (epoch {}), MEM = {}  ".format(iteration, epoch,process.memory_info().rss/1000000.0))
+        
+	# make evaluation on validation set, and save model
         if (iteration % opt.save_checkpoint_every == 0):
             # eval model
             eval_kwargs = {'split': 'val',
@@ -195,6 +218,15 @@ def train(opt):
                     print("model saved to {}".format(checkpoint_path))
                     with open(os.path.join(opt.checkpoint_path, 'infos_'+opt.id+'-best.pkl'), 'wb') as f:
                         cPickle.dump(infos, f)
+
+	#new
+	gc.collect()
+	gc.collect()
+	#new
+	print("--iter {} (epoch {}), MEM = {}  ".format(iteration, epoch,process.memory_info().rss/1000000.0))
+
+	#if iteration%1000==0:
+	#	time.sleep(100)
 
         # Stop if reaching max epochs
         if epoch >= opt.max_epochs and opt.max_epochs != -1:
